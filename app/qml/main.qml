@@ -266,7 +266,7 @@ ApplicationWindow {
         panelHeight: window.height
         previewHeight: window.height/3
         project: __loader.project
-        z: zPanel
+        z: 0
     }
 
 }
