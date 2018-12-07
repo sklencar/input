@@ -30,12 +30,12 @@ ProjectModel::ProjectModel(const QString &dataDir, QObject* parent)
 ProjectModel::~ProjectModel() {}
 
 void ProjectModel::findProjectFiles() {
-    QDirIterator it(mDataDir, QStringList() << "*.qgs", QDir::Files, QDirIterator::Subdirectories);
+    QDirIterator it(mDataDir, QStringList() << "*.qgz" << "*.qgs", QDir::Files, QDirIterator::Subdirectories);
     while (it.hasNext())
     {
         it.next();
         ProjectFile projectFile;
-        projectFile.name = it.fileName().remove(".qgs");
+        projectFile.name = it.fileName().remove(".qgz").remove(".qgs");
         projectFile.path = it.filePath();
         QFileInfo fileInfo(it.filePath());
         QDateTime created = fileInfo.created();
