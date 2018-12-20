@@ -206,7 +206,6 @@ bool MerginApi::cacheProjectsData(const QByteArray &data)
     return true;
 }
 
-// TODO delete/move code
 void MerginApi::handleDataStream(QNetworkReply* r)
 {
 
@@ -244,7 +243,6 @@ void MerginApi::handleDataStream(QNetworkReply* r)
         boundary = match.captured("boundary");
     }
 
-    //QByteArray data = r->readAll();
     int boundarySize = boundary.length() + 8; // plus some trashold
     QRegularExpression boundaryPattern("(\r\n)?--" + boundary + "\r\n");
     QRegularExpression headerPattern("Content-Disposition: form-data; name=\"(?P<name>[^'\"]+)\"(; filename=\"(?P<filename>[^\"]+)\")?\r\n(Content-Type: (?P<content_type>.+))?\r\n");
@@ -263,12 +261,9 @@ void MerginApi::handleDataStream(QNetworkReply* r)
             if (!activeFilePath.isEmpty()) {
                 // write rest of data to active file
                 QRegularExpressionMatch endMatch = endPattern.match(data);
-                int tillIndex = data.indexOf(endMatch.captured(0)); //+ endMatch.captured(0).length();
-                fileData.clear();
-                data.remove(tillIndex, data.size() - tillIndex);
-                fileData = data;
-
-                bool finished = saveFile(fileData, activeFilePath, true);
+                int tillIndex = data.indexOf(endMatch.captured(0));
+                bool finished = saveFile(data.left(tillIndex), activeFilePath, true);
+                activeFilePath = "";
             }
             return;
         }
@@ -276,15 +271,12 @@ void MerginApi::handleDataStream(QNetworkReply* r)
         data = data.append(chunk);
         dataString = QString::fromStdString(data.toStdString());
         QRegularExpressionMatch boundaryMatch = boundaryPattern.match(dataString);
+
         while (boundaryMatch.hasMatch()) {
             // file data have been splited.
             if (!activeFilePath.isEmpty()) {
                 int tillIndex = data.indexOf(boundaryMatch.captured(0));
-                // TODO check
-                fileData.clear();
-                fileData.append(data, tillIndex);
-                //data = data.remove()
-                bool finished = saveFile(fileData, activeFilePath, true);
+                bool finished = saveFile(data.left(tillIndex), activeFilePath, true); // -1 eleted
                 activeFilePath = ""; // writing to one file is finished
             }
 
@@ -295,22 +287,16 @@ void MerginApi::handleDataStream(QNetworkReply* r)
 
             QRegularExpressionMatch headerMatch = headerPattern.match(dataString);
             if (!headerMatch.hasMatch()) {
-                //print('-- CORRUPTED HEADER --') # probably not enough data
+                qDebug() << "-- CORRUPTED HEADER --";
                 data = data + r->read(CHUNK_SIZE);
                 dataString = QString::fromStdString(data.toStdString());
             }
             headerMatch = headerPattern.match(dataString);
             data = data.remove(0, headerMatch.captured(0).length());
+            dataString = QString::fromStdString(data.toStdString());
             QString name = headerMatch.captured("name");
             QString filename = headerMatch.captured("filename"); // TODO same s name ????
             QString fileContentType = (headerMatch.captured("content_type"));
-            // TODO write file
-//            bool finished = saveFile(data, projectDir + "/" + filename, false);
-//            qDebug() << "Downloading file " << finished;
-//            if (finished) {
-//                // active file
-//                activeFilePath = QString(projectDir + "/" + filename);
-//            }
 
             // just CREATE file
             QDir dir;
@@ -325,16 +311,13 @@ void MerginApi::handleDataStream(QNetworkReply* r)
                 qDebug() << "Creating folder failed";
             }
             activeFilePath = projectDir + "/" + filename;
-            boundaryMatch = boundaryPattern.match(data);
+            boundaryMatch = boundaryPattern.match(dataString);
         }
 
 
         // Write rest of chunk to file
         if (!activeFilePath.isEmpty()) {
-            fileData.clear();
-            fileData = data;
-            fileData = fileData.remove(data.size() - boundarySize, boundarySize);
-            saveFile(fileData, activeFilePath, true);
+            saveFile(data.left(data.size() - boundarySize), activeFilePath, true);
         }
         data = data.remove(0, data.size() - boundarySize);
     }
@@ -367,9 +350,7 @@ bool MerginApi::saveFile(const QByteArray &data, QString filePath, bool append)
         }
     }
 
-    file.seek(file.size()); // file.pos()
-    QDataStream stream(&file);
-    stream << data;
+    file.write(data);
     file.close();
 
     qDebug() << "File has size " << file.size() << " " << filePath;
