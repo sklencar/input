@@ -40,6 +40,8 @@ private:
     QString saveFileName(const QUrl &url);
     void unzipProject(QString path, QString dir);
     bool cacheProjectsData(const QByteArray &data);
+    void handleDataStream(QNetworkReply* r);
+    bool saveFile(const QByteArray &data, QString fileName, bool append);
 
     QNetworkAccessManager mManager;
     QString mApiRoot;

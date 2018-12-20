@@ -30,7 +30,7 @@ void MerginApi::listProjects()
     mMerginProjects.clear();
     QNetworkRequest request;
     // projects filtered by tag "input_use"
-    QUrl url(mApiRoot + "/v1/project?tags=input_use");
+    QUrl url(mApiRoot + "/v1/project"); //?tags=input_use"
     request.setUrl(url);
     request.setRawHeader("Authorization", QByteArray("Basic " + mToken));
 
@@ -45,7 +45,7 @@ void MerginApi::downloadProject(QString projectName)
     }
 
     QNetworkRequest request;
-    QUrl url(mApiRoot + "/v1/project/download/" + projectName + "?format=zip");
+    QUrl url(mApiRoot + "/v1/project/download/" + projectName);
     qDebug() << "Requested " << url.toString();
 
     if (mPendingRequests.contains(url)) {
@@ -123,18 +123,9 @@ void MerginApi::downloadProjectReplyFinished()
         return;
     }
 
-    QString projectName("temp");
-    if (mPendingRequests.contains(r->url())) {
-        projectName = mPendingRequests.value(r->url());
-    }
-
     if (r->error() == QNetworkReply::NoError)
     {
-        QString extention = ".zip";
-        QString filePath = createProjectFile(r->readAll(), projectName + extention);
-        QString projectDir = mDataDir + projectName;
-        unzipProject(filePath, projectDir + "/");
-        emit downloadProjectFinished(projectDir, projectName);
+        handleDataStream(r);
         emit notify("Download successful");
     }
     else {
@@ -196,6 +187,7 @@ void MerginApi::unzipProject(QString path, QString dir)
     QgsZipUtils::unzip(path, dir, files);
 }
 
+// TODO refactor with saveFile
 bool MerginApi::cacheProjectsData(const QByteArray &data)
 {
     QDir dir;
@@ -210,6 +202,177 @@ bool MerginApi::cacheProjectsData(const QByteArray &data)
     QDataStream stream(&file);
     stream << data;
     file.close();
+
+    return true;
+}
+
+// TODO delete/move code
+void MerginApi::handleDataStream(QNetworkReply* r)
+{
+
+    QString projectName("temp");
+    if (mPendingRequests.contains(r->url())) {
+        projectName = mPendingRequests.value(r->url());
+    }
+    QDir dir;
+    if (!dir.exists(mDataDir))
+        dir.mkpath(mDataDir);
+    QFile file(mDataDir + projectName);
+    if (file.exists()) {
+        qDebug("Zip file already exists!");
+        // TODO overwrite projects / handle data-sync
+    }
+    QString projectDir = mDataDir + projectName;
+
+    QByteArray contentType;
+    QList<QByteArray> headerList = r->rawHeaderList();
+    foreach(QByteArray head, headerList) {
+        if (head.compare("Content-Type") == 0) {
+            contentType = r->rawHeader(head);
+            qDebug() << head << ":" << r->rawHeader(head);
+        }
+    }
+
+    QString content = QString::fromStdString(contentType.toStdString());
+    int CHUNK_SIZE = 65536;
+    QString boundary;
+    QRegularExpression re;
+    re.setPattern("[^;]+; boundary=(?<boundary>.+)");
+
+    QRegularExpressionMatch match = re.match(content);
+    if (match.hasMatch()) {
+        boundary = match.captured("boundary");
+    }
+
+    //QByteArray data = r->readAll();
+    int boundarySize = boundary.length() + 8; // plus some trashold
+    QRegularExpression boundaryPattern("(\r\n)?--" + boundary + "\r\n");
+    QRegularExpression headerPattern("Content-Disposition: form-data; name=\"(?P<name>[^'\"]+)\"(; filename=\"(?P<filename>[^\"]+)\")?\r\n(Content-Type: (?P<content_type>.+))?\r\n");
+    QRegularExpression endPattern("(\r\n)?--" + boundary +  "--\r\n");
+
+    QByteArray fileData; // obj
+    QByteArray data;
+    QString dataString;
+    QString activeFilePath;
+
+    // read and write data
+    while (true) {
+        QByteArray chunk = r->read(CHUNK_SIZE);
+        if (chunk.isEmpty()) {
+            // END OF STREAM
+            if (!activeFilePath.isEmpty()) {
+                // write rest of data to active file
+                QRegularExpressionMatch endMatch = endPattern.match(data);
+                int tillIndex = data.indexOf(endMatch.captured(0)); //+ endMatch.captured(0).length();
+                fileData.clear();
+                data.remove(tillIndex, data.size() - tillIndex);
+                fileData = data;
+
+                bool finished = saveFile(fileData, activeFilePath, true);
+            }
+            return;
+        }
+
+        data = data.append(chunk);
+        dataString = QString::fromStdString(data.toStdString());
+        QRegularExpressionMatch boundaryMatch = boundaryPattern.match(dataString);
+        while (boundaryMatch.hasMatch()) {
+            // file data have been splited.
+            if (!activeFilePath.isEmpty()) {
+                int tillIndex = data.indexOf(boundaryMatch.captured(0));
+                // TODO check
+                fileData.clear();
+                fileData.append(data, tillIndex);
+                //data = data.remove()
+                bool finished = saveFile(fileData, activeFilePath, true);
+                activeFilePath = ""; // writing to one file is finished
+            }
+
+            // delete previously written data with next boundary part
+            int tillIndex = data.indexOf(boundaryMatch.captured(0)) + boundaryMatch.captured(0).length();
+            data = data.remove(0, tillIndex); // String != QByteArray
+            dataString = QString::fromStdString(data.toStdString());
+
+            QRegularExpressionMatch headerMatch = headerPattern.match(dataString);
+            if (!headerMatch.hasMatch()) {
+                //print('-- CORRUPTED HEADER --') # probably not enough data
+                data = data + r->read(CHUNK_SIZE);
+                dataString = QString::fromStdString(data.toStdString());
+            }
+            headerMatch = headerPattern.match(dataString);
+            data = data.remove(0, headerMatch.captured(0).length());
+            QString name = headerMatch.captured("name");
+            QString filename = headerMatch.captured("filename"); // TODO same s name ????
+            QString fileContentType = (headerMatch.captured("content_type"));
+            // TODO write file
+//            bool finished = saveFile(data, projectDir + "/" + filename, false);
+//            qDebug() << "Downloading file " << finished;
+//            if (finished) {
+//                // active file
+//                activeFilePath = QString(projectDir + "/" + filename);
+//            }
+
+            // just CREATE file
+            QDir dir;
+            if (!dir.exists(mDataDir))
+                dir.mkpath(mDataDir);
+
+             QFileInfo newFile( projectDir + "/" + filename );
+            // Create path for a new file if it does not exist.
+            if ( !newFile.absoluteDir().exists() )
+            {
+              if ( !QDir( dir ).mkpath( newFile.absolutePath() ) )
+                qDebug() << "Creating folder failed";
+            }
+            activeFilePath = projectDir + "/" + filename;
+            boundaryMatch = boundaryPattern.match(data);
+        }
+
+
+        // Write rest of chunk to file
+        if (!activeFilePath.isEmpty()) {
+            fileData.clear();
+            fileData = data;
+            fileData = fileData.remove(data.size() - boundarySize, boundarySize);
+            saveFile(fileData, activeFilePath, true);
+        }
+        data = data.remove(0, data.size() - boundarySize);
+    }
+
+}
+
+bool MerginApi::saveFile(const QByteArray &data, QString filePath, bool append)
+{
+
+    QDir dir;
+    if (!dir.exists(mDataDir))
+        dir.mkpath(mDataDir);
+
+     QFileInfo newFile( filePath );
+    // Create path for a new file if it does not exist.
+    if ( !newFile.absoluteDir().exists() )
+    {
+      if ( !QDir( dir ).mkpath( newFile.absolutePath() ) )
+        qDebug() << "Creating folder failed. tralala!!!!!";
+    }
+
+    QFile file(filePath);
+    if (append) {
+        if (!file.open(QIODevice::Append)) {
+            return false; // TODO
+        }
+    } else {
+        if (!file.open(QIODevice::WriteOnly)) {
+            return false; // TODO
+        }
+    }
+
+    file.seek(file.size()); // file.pos()
+    QDataStream stream(&file);
+    stream << data;
+    file.close();
+
+    qDebug() << "File has size " << file.size() << " " << filePath;
 
     return true;
 }
