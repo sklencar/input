@@ -26,7 +26,7 @@ public:
 
 signals:
     void listProjectsFinished();
-    void downloadProjectFinished(QString projectFolder, QString projectName);
+    void downloadProjectFinished(QString projectDir, QString projectName);
     void networkErrorOccurred(QString message, QString additionalInfo);
     void notify(QString message);
 
@@ -37,11 +37,10 @@ private slots:
 private:
     ProjectList parseProjectsData( const QByteArray &data );
     void makeToast(const QString &errorMessage, const QString &additionalInfo);
-    QString saveFileName(const QUrl &url);
-    void unzipProject(QString path, QString dir);
     bool cacheProjectsData(const QByteArray &data);
-    void handleDataStream(QNetworkReply* r);
+    void handleDataStream(QNetworkReply* r, QString projectDir);
     bool saveFile(const QByteArray &data, QString fileName, bool append);
+    void createPathIfNotExists(QString filePath);
 
     QNetworkAccessManager mManager;
     QString mApiRoot;
@@ -50,7 +49,7 @@ private:
     QByteArray mToken;
     QHash<QUrl, QString>mPendingRequests;
 
-    QString createProjectFile( const QByteArray &data, QString projectName );
+    const int CHUNK_SIZE = 65536;
 };
 
 #endif // MERGINAPI_H
