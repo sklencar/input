@@ -6,6 +6,7 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QDate>
+#include <QByteArray>
 
 #ifdef ANDROID
 #include <QtAndroid>
@@ -30,7 +31,7 @@ void MerginApi::listProjects()
     mMerginProjects.clear();
     QNetworkRequest request;
     // projects filtered by tag "input_use"
-    QUrl url(mApiRoot + "/v1/project"); //?tags=input_use"
+    QUrl url(mApiRoot + "/v1/project?tags=input_use");
     request.setUrl(url);
     request.setRawHeader("Authorization", QByteArray("Basic " + mToken));
 
@@ -161,8 +162,11 @@ void MerginApi::handleDataStream(QNetworkReply* r, QString projectDir)
     QByteArray contentType;
     QString contentTypeString;
     QList<QByteArray> headerList = r->rawHeaderList();
+    // QByteArray.compare was introduced in Qt 5.12; String conversion needed for Android build
+    QString headString;
     foreach(QByteArray head, headerList) {
-        if (head.compare("Content-Type") == 0) {
+        headString = QString::fromStdString(head.toStdString());
+        if (headString.compare("Content-Type") == 0) {
             contentType = r->rawHeader(head);
             contentTypeString = QString::fromStdString(contentType.toStdString());
         }
@@ -242,23 +246,20 @@ void MerginApi::handleDataStream(QNetworkReply* r, QString projectDir)
 
 bool MerginApi::saveFile(const QByteArray &data, QString filePath, bool append)
 {
-
     createPathIfNotExists(filePath);
     QFile file(filePath);
     if (append) {
         if (!file.open(QIODevice::Append)) {
-            return false; // TODO
+            return false;
         }
     } else {
         if (!file.open(QIODevice::WriteOnly)) {
-            return false; // TODO
+            return false;
         }
     }
 
     file.write(data);
     file.close();
-
-    qDebug() << "File has size " << file.size() << " " << filePath;
 
     return true;
 }
