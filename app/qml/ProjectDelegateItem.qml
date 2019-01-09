@@ -18,6 +18,7 @@ Rectangle {
     property string state
     property bool highlight: false
     property bool pending: false
+    property string statusIconSource: "more_menu.svg"
 
     signal itemClicked();
     signal menuClicked()
@@ -100,15 +101,21 @@ Rectangle {
                     }
                 }
 
-                Text {
+                Image {
+                    anchors.margins: (itemContainer.cellHeight/4)
+                    id: statusIcon
                     anchors.fill: parent
-                    text: "..."
-                    height: textContainer.height/2
-                    font.pixelSize: InputStyle.fontPixelSizeSmall
-                    font.weight: Font.Bold
+                    source: statusIconSource
+                    sourceSize.width: width
+                    sourceSize.height: height
+                    fillMode: Image.PreserveAspectFit
+                    visible: !pending
+                }
+
+                ColorOverlay {
+                    anchors.fill: statusIcon
+                    source: statusIcon
                     color: itemContainer.highlight ? itemContainer.primaryColor : itemContainer.secondaryColor
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
                     visible: !pending
                 }
 

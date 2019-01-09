@@ -22,6 +22,15 @@ Popup {
         projectsPanel.visible = true
     }
 
+    function getStatusIcon(projectStatus) {
+        if (projectStatus === "noVersion") return "download.svg"
+        else if (projectStatus === "outOfDate") return "update.svg"
+        else if (projectStatus === "upToDate") return "check.svg"
+
+        return "more_menu.svg"
+    }
+
+
     Component.onCompleted: {
         // load model just after all components are prepared
         // otherwise GridView's delegate item is initialized invalidately
@@ -194,7 +203,9 @@ Popup {
                 }
             }
             pending: showMergin ? pending : false
-
+            statusIconSource: {
+                !showMergin ? "more_menu.svg" : getStatusIcon(projectStatus)
+            }
 
             onItemClicked: {
                 if (showMergin) return
