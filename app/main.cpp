@@ -285,6 +285,7 @@ int main(int argc, char *argv[])
   QObject::connect(&loader, &Loader::projectReloaded, &mtm, &MapThemesModel::reloadMapThemes);
   QObject::connect(&mtm, &MapThemesModel::reloadLayers, &lm, &LayersModel::reloadLayers);
   QObject::connect(ma.get(), &MerginApi::downloadProjectFinished, &mpm, &MerginProjectModel::downloadProjectFinished);
+  QObject::connect(ma.get(), &MerginApi::fetchProjectFinished, &mpm, &MerginProjectModel::downloadProjectFinished);
   QObject::connect(ma.get(), &MerginApi::downloadProjectFinished, &pm, &ProjectModel::addProject);
   QObject::connect(ma.get(), &MerginApi::listProjectsFinished, &mpm, &MerginProjectModel::resetProjects);
 

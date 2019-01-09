@@ -7,6 +7,7 @@
 #include <QJsonArray>
 #include <QDate>
 #include <QByteArray>
+#include <QSet>
 
 #ifdef ANDROID
 #include <QtAndroid>
@@ -41,6 +42,13 @@ void MerginApi::listProjects()
 
 void MerginApi::downloadProject(QString projectName)
 {
+    // Redirect to data-sync if project exists
+    QDir projectDir(mDataDir + projectName);
+    if (projectDir.exists()) {
+        projectInfo(projectName);
+        return;
+    }
+
     if (mToken.isEmpty()) {
         emit networkErrorOccurred( "Auth token is invalid", "Mergin API error: downloadProject" );
     }
@@ -61,6 +69,44 @@ void MerginApi::downloadProject(QString projectName)
 
     QNetworkReply *reply = mManager.get(request);
     mPendingRequests.insert(url, projectName);
+    connect(reply, &QNetworkReply::finished, this, &MerginApi::downloadProjectReplyFinished);
+}
+
+void MerginApi::projectInfo(QString projectName)
+{
+
+    if (mToken.isEmpty()) {
+        emit networkErrorOccurred( "Auth token is invalid", "Mergin API error: projectInfo" );
+    }
+
+    QNetworkRequest request;
+    QUrl url(mApiRoot + "/v1/project/" + projectName);
+    qDebug() << "Requested " << url.toString();
+
+    request.setUrl(url);
+    request.setRawHeader("Authorization", QByteArray("Basic " + mToken));
+
+    QNetworkReply *reply = mManager.get(request);
+    mPendingRequests.insert(url, projectName);
+    connect(reply, &QNetworkReply::finished, this, &MerginApi::projectInfoReplyFinished);
+
+}
+
+void MerginApi::fetchProject(QString projectName, QByteArray json)
+{
+    if (mToken.isEmpty()) {
+        emit networkErrorOccurred( "Auth token is invalid", "Mergin API error: fetchProject" );
+        return;
+    }
+
+    QNetworkRequest request;
+    QUrl url(mApiRoot + "/v1/project/fetch/" + projectName);
+    request.setUrl(url);
+    request.setRawHeader("Authorization", QByteArray("Basic " + mToken));
+    request.setRawHeader("Content-Type", "application/json");
+    request.setRawHeader("Accept", "application/json");
+
+    QNetworkReply *reply = mManager.post(request, json);
     connect(reply, &QNetworkReply::finished, this, &MerginApi::downloadProjectReplyFinished);
 }
 
@@ -97,6 +143,8 @@ void MerginApi::downloadProjectReplyFinished()
     QNetworkReply* r = qobject_cast<QNetworkReply*>(sender());
     if (!r) {
         emit networkErrorOccurred( "No reply received.", "Mergin API error: downloadProject" );
+        qDebug() << r->errorString();
+        mPendingRequests.remove(r->url());
         return;
     }
 
@@ -114,10 +162,138 @@ void MerginApi::downloadProjectReplyFinished()
         emit notify("Download successful");
     }
     else {
+        qDebug() << r->errorString();
         emit networkErrorOccurred( r->errorString(), "Mergin API error: downloadProject" );
     }
     mPendingRequests.remove(r->url());
     r->deleteLater();
+}
+
+void MerginApi::projectInfoReplyFinished()
+{
+    QNetworkReply* r = qobject_cast<QNetworkReply*>(sender());
+    if (!r) {
+        emit networkErrorOccurred( "No reply received.", "Mergin API error: projectInfo" );
+        return;
+    }
+
+    // TODO refactor
+    QList<QString> removed;
+    QList<QString> added;
+    QList<QString> renamed;
+    QList<QString> updated;
+
+    QList<MerginFile> files;
+
+    QUrl url = r->url();
+    QStringList res = url.path().split("/");
+    QString projectName;
+    projectName = res.last();
+    qDebug() << "project updated: " << projectName;
+    QString projectPath = QString(mDataDir + projectName + "/");
+
+    if (r->error() == QNetworkReply::NoError)
+    {
+      // TODO pending request
+
+      QByteArray data = r->readAll();
+      QJsonDocument doc = QJsonDocument::fromJson(data);
+      if (doc.isObject()) {
+          QJsonObject docObj = doc.object();
+          auto it = docObj.constFind("files");
+          QJsonValue v = *it;
+          Q_ASSERT( v.isArray() );
+          QJsonArray vArray = v.toArray();
+
+          QSet<QString> localFiles = listFiles(projectPath);
+          for ( auto it = vArray.constBegin(); it != vArray.constEnd(); ++it)
+          {
+            QJsonObject projectInfoMap = it->toObject();
+            QString serverChecksum = projectInfoMap.value("checksum").toString();
+            QString path = projectInfoMap.value("path").toString();
+            QString location = projectInfoMap.value("location").toString();
+            QString mtime = projectInfoMap.value("mtime").toString();
+            QString size = projectInfoMap.value("size").toString();
+            QString localChecksum = QString::fromStdString(getChecksum(projectPath + path).toStdString());
+
+            localFiles.remove(path);
+
+            // File is localy missing
+            if (localChecksum.isEmpty()) {
+                // TODO version
+                QString version = "v_1";
+
+                MerginFile file;
+                file.checksum = serverChecksum;
+                file.size = 0;
+                file.path = path;
+                file.location = version + "/" + path;
+                file.mtime = mtime;
+                files.append(file);
+
+                added.append(path); // TODO remove
+            }
+
+            //
+            else if (serverChecksum.compare(localChecksum) != 0) {
+                updated.append(path);
+            }
+
+            qDebug() << path << " : " << serverChecksum << "|" << localChecksum;
+          }
+
+          // abundant files
+          if (!localFiles.isEmpty()) {
+              removed = localFiles.toList();
+          }
+      }
+      QJsonDocument jsonDoc;
+      QJsonArray fileArray;
+
+      // TODO handle removed, moved, changed
+      for(MerginFile file: files) {
+        QJsonObject fileObject;
+        fileObject.insert("path", file.path);
+        fileObject.insert("checksum", file.checksum);
+        fileObject.insert("mtime", file.mtime);
+        fileObject.insert("location", file.location);
+        fileObject.insert("size", file.size);
+        fileArray.append(fileObject);
+      }
+
+      jsonDoc.setArray(fileArray);
+      fetchProject(projectName, jsonDoc.toJson(QJsonDocument::Compact));
+    }
+    else {
+        QString message = QStringLiteral("Network API error: %1(): %2").arg("listProjects", r->errorString());
+        qDebug("%s", message.toStdString().c_str());
+        emit networkErrorOccurred( r->errorString(), "Mergin API error: projectInfo" );
+    }
+
+    r->deleteLater();
+    emit projectInfoFinished();
+}
+
+void MerginApi::fetchProjectReplyFinished()
+{
+    QNetworkReply* r = qobject_cast<QNetworkReply*>(sender());
+    if (!r) {
+        emit networkErrorOccurred( "No reply received.", "Mergin API error: fetchProject" );
+        return;
+    }
+
+    if (r->error() == QNetworkReply::NoError)
+    {
+      QByteArray data = r->readAll();
+    }
+    else {
+        QString message = QStringLiteral("Network API error: %1(): %2").arg("fetchProject", r->errorString());
+        qDebug("%s", message.toStdString().c_str());
+        emit networkErrorOccurred( r->errorString(), "Mergin API error: fetchProject" );
+    }
+
+    r->deleteLater();
+    //emit fetchProjectFinished(projectDir, projectName);
 }
 
 ProjectList MerginApi::parseProjectsData(const QByteArray &data)
@@ -130,10 +306,10 @@ ProjectList MerginApi::parseProjectsData(const QByteArray &data)
 
         for ( auto it = vArray.constBegin(); it != vArray.constEnd(); ++it)
         {
-            QJsonObject designMap = it->toObject();
+            QJsonObject projectMap = it->toObject();
             MerginProject p;
-            p.name = designMap.value("name").toString();
-            QString created = designMap.value("created").toString();
+            p.name = projectMap.value("name").toString();
+            QString created = projectMap.value("created").toString();
             p.info = QDateTime::fromString(created, Qt::ISODateWithMs).toString();
             result << std::make_shared<MerginProject>(p);
         }
@@ -276,4 +452,32 @@ void MerginApi::createPathIfNotExists(QString filePath)
       if ( !QDir( dir ).mkpath( newFile.absolutePath() ) )
         qDebug() << "Creating folder failed";
     }
+}
+
+QByteArray MerginApi::getChecksum(QString filePath) {
+    QFile f(filePath);
+    if (f.open(QFile::ReadOnly)) {
+        QCryptographicHash hash(QCryptographicHash::Sha1);
+        QByteArray chunk = f.read(CHUNK_SIZE);
+        while (!chunk.isEmpty()) {
+           hash.addData(chunk);
+           chunk = f.read(CHUNK_SIZE);
+           hash.addData(chunk);
+        }
+        return hash.result().toHex();
+    }
+    f.close();
+    return QByteArray();
+}
+
+QSet<QString> MerginApi::listFiles(QString path)
+{
+    QSet<QString> files;
+    QDirIterator it(path, QStringList() << QStringLiteral("*"), QDir::Files, QDirIterator::Subdirectories);
+    while (it.hasNext())
+    {
+        it.next();
+        files << it.filePath().replace(path, "");
+    }
+    return files;
 }
