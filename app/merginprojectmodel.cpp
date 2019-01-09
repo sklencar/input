@@ -21,7 +21,12 @@ QVariant MerginProjectModel::data( const QModelIndex& index, int role ) const
     {
     case Name: return QVariant(project->name);
     case ProjectInfo: return QVariant(project->info);
-    case Status: return QVariant(project->pending);
+    case Status: {
+        if (project->status == ProjectStatus::OutOfDate) return QVariant("outOfDate");
+        if (project->status == ProjectStatus::UpToDate) return QVariant("upToDate");
+        if (project->status == ProjectStatus::NoVersion) return QVariant("noVersion");
+    }
+    case Pending: return QVariant(project->pending);
     }
 
     return QVariant();
@@ -32,7 +37,8 @@ QHash<int, QByteArray> MerginProjectModel::roleNames() const
     QHash<int, QByteArray> roleNames = QAbstractListModel::roleNames();
     roleNames[Name] = "name";
     roleNames[ProjectInfo] = "projectInfo";
-    roleNames[Status] = "pending";
+    roleNames[Status] = "projectStatus";
+    roleNames[Pending] = "pending";
     return roleNames;
 }
 
@@ -67,6 +73,7 @@ void MerginProjectModel::downloadProjectFinished(QString projectFolder, QString 
         if (project->name == projectName) {
             beginResetModel();
             project->pending = false;
+            project->status = ProjectStatus::UpToDate;
             endResetModel();
             emit merginProjectsChanged();
 

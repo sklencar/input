@@ -17,7 +17,8 @@ class MerginProjectModel: public QAbstractListModel
       Name = Qt::UserRole + 1,
       Size,
       ProjectInfo,
-      Status // just "pending" for now
+      Status,
+      Pending
     };
     Q_ENUMS( Roles )
 

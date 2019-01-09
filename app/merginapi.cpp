@@ -42,7 +42,7 @@ void MerginApi::listProjects()
 
 void MerginApi::downloadProject(QString projectName)
 {
-    // Redirect to data-sync if project exists
+    // Redirect to get info and fetch data if project exists
     QDir projectDir(mDataDir + projectName);
     if (projectDir.exists()) {
         projectInfo(projectName);
@@ -87,7 +87,6 @@ void MerginApi::projectInfo(QString projectName)
     request.setRawHeader("Authorization", QByteArray("Basic " + mToken));
 
     QNetworkReply *reply = mManager.get(request);
-    mPendingRequests.insert(url, projectName);
     connect(reply, &QNetworkReply::finished, this, &MerginApi::projectInfoReplyFinished);
 
 }
@@ -105,6 +104,7 @@ void MerginApi::fetchProject(QString projectName, QByteArray json)
     request.setRawHeader("Authorization", QByteArray("Basic " + mToken));
     request.setRawHeader("Content-Type", "application/json");
     request.setRawHeader("Accept", "application/json");
+    mPendingRequests.insert(url, projectName);
 
     QNetworkReply *reply = mManager.post(request, json);
     connect(reply, &QNetworkReply::finished, this, &MerginApi::downloadProjectReplyFinished);
@@ -177,14 +177,7 @@ void MerginApi::projectInfoReplyFinished()
         return;
     }
 
-    // TODO refactor
-    QList<QString> removed;
-    QList<QString> added;
-    QList<QString> renamed;
-    QList<QString> updated;
-
     QList<MerginFile> files;
-
     QUrl url = r->url();
     QStringList res = url.path().split("/");
     QString projectName;
@@ -194,8 +187,6 @@ void MerginApi::projectInfoReplyFinished()
 
     if (r->error() == QNetworkReply::NoError)
     {
-      // TODO pending request
-
       QByteArray data = r->readAll();
       QJsonDocument doc = QJsonDocument::fromJson(data);
       if (doc.isObject()) {
@@ -211,53 +202,31 @@ void MerginApi::projectInfoReplyFinished()
             QJsonObject projectInfoMap = it->toObject();
             QString serverChecksum = projectInfoMap.value("checksum").toString();
             QString path = projectInfoMap.value("path").toString();
-            QString location = projectInfoMap.value("location").toString();
-            QString mtime = projectInfoMap.value("mtime").toString();
-            QString size = projectInfoMap.value("size").toString();
             QString localChecksum = QString::fromStdString(getChecksum(projectPath + path).toStdString());
 
             localFiles.remove(path);
-
-            // File is localy missing
-            if (localChecksum.isEmpty()) {
-                // TODO version
-                QString version = "v_1";
-
-                MerginFile file;
-                file.checksum = serverChecksum;
-                file.size = 0;
-                file.path = path;
-                file.location = version + "/" + path;
-                file.mtime = mtime;
-                files.append(file);
-
-                added.append(path); // TODO remove
-            }
-
-            //
-            else if (serverChecksum.compare(localChecksum) != 0) {
-                updated.append(path);
-            }
-
+            MerginFile file;
+            file.checksum = serverChecksum;
+            file.path = path;
+            files.append(file);
             qDebug() << path << " : " << serverChecksum << "|" << localChecksum;
           }
 
           // abundant files
           if (!localFiles.isEmpty()) {
-              removed = localFiles.toList();
+              for (QString filename: localFiles) {
+                  QFile file (projectPath + filename);
+                  file.remove();
+              }
           }
       }
       QJsonDocument jsonDoc;
       QJsonArray fileArray;
 
-      // TODO handle removed, moved, changed
       for(MerginFile file: files) {
         QJsonObject fileObject;
         fileObject.insert("path", file.path);
         fileObject.insert("checksum", file.checksum);
-        fileObject.insert("mtime", file.mtime);
-        fileObject.insert("location", file.location);
-        fileObject.insert("size", file.size);
         fileArray.append(fileObject);
       }
 
@@ -308,7 +277,15 @@ ProjectList MerginApi::parseProjectsData(const QByteArray &data)
         {
             QJsonObject projectMap = it->toObject();
             MerginProject p;
+            QJsonValue meta = projectMap.value("meta");
             p.name = projectMap.value("name").toString();
+            if (meta.isObject()) {
+                QJsonObject metaObject = meta.toObject();
+                int size = metaObject.value("size").toInt(0);
+                int filesCount = metaObject.value("files_count").toInt(0);
+                p.status = getProjectStatus(mDataDir + p.name, size, filesCount);
+            }
+
             QString created = projectMap.value("created").toString();
             p.info = QDateTime::fromString(created, Qt::ISODateWithMs).toString();
             result << std::make_shared<MerginProject>(p);
@@ -446,12 +423,28 @@ void MerginApi::createPathIfNotExists(QString filePath)
     if (!dir.exists(mDataDir))
         dir.mkpath(mDataDir);
 
-     QFileInfo newFile( filePath );
+    QFileInfo newFile( filePath );
     if ( !newFile.absoluteDir().exists() )
     {
       if ( !QDir( dir ).mkpath( newFile.absolutePath() ) )
         qDebug() << "Creating folder failed";
     }
+}
+
+// TODO fix when a project is open - could have different size and files number
+ProjectStatus MerginApi::getProjectStatus(QString projectPath, int size, int filesCount)
+{
+    QFileInfo info(projectPath);
+    if (!info.exists()) {
+        return ProjectStatus::NoVersion;
+    }
+
+    int filesOnDisk = listFiles(projectPath).size();
+    int totalSize = sizeOfProject(projectPath);
+    if (size != totalSize || filesOnDisk != filesCount) {
+        return ProjectStatus::OutOfDate;
+    }
+    return ProjectStatus::UpToDate;
 }
 
 QByteArray MerginApi::getChecksum(QString filePath) {
@@ -480,4 +473,15 @@ QSet<QString> MerginApi::listFiles(QString path)
         files << it.filePath().replace(path, "");
     }
     return files;
+}
+
+int MerginApi::sizeOfProject(QString path) {
+    QDirIterator it(path, QStringList() << QStringLiteral("*"), QDir::Files, QDirIterator::Subdirectories);
+    int totalSize = 0;
+    while (it.hasNext())
+    {
+        it.next();
+        totalSize += it.fileInfo().size();
+    }
+    return totalSize;
 }

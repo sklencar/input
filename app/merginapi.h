@@ -7,19 +7,26 @@
 #include <memory>
 #include <QFile>
 
+enum ProjectStatus
+{
+  NoVersion = Qt::UserRole + 1,
+  Pending,
+  UpToDate,
+  OutOfDate
+};
+Q_ENUMS( ProjectStatus )
+
 struct MerginProject {
     QString name;
     QStringList tags;
     QString info;
     bool pending = false;
+    ProjectStatus status = NoVersion;
 };
 
 struct MerginFile {
     QString path;
     QString checksum;
-    QString location;
-    QString mtime;
-    int size;
 };
 
 
@@ -59,8 +66,10 @@ private:
     void handleDataStream(QNetworkReply* r, QString projectDir);
     bool saveFile(const QByteArray &data, QString fileName, bool append);
     void createPathIfNotExists(QString filePath);
+    ProjectStatus getProjectStatus(QString projectName, int size, int filesCount);
     QByteArray getChecksum(QString filePath);
     QSet<QString> listFiles(QString projectPath);
+    int sizeOfProject(QString projectPath);
 
     QNetworkAccessManager mManager;
     QString mApiRoot;
