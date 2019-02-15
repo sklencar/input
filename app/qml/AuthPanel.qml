@@ -193,7 +193,7 @@ Item {
                     id: loginButton
                     width: loginForm.width - 2* root.panelMargin
                     height: fieldHeight
-                    text: qsTr("Login")
+                    text: qsTr("Sign in")
                     font.pixelSize: loginButton.height/2
                     anchors.horizontalCenter: parent.horizontalCenter
                     onClicked: {
@@ -210,6 +210,31 @@ Item {
                         color: InputStyle.fontColor
                         horizontalAlignment: Text.AlignHCenter
                         verticalAlignment: Text.AlignVCenter
+                        elide: Text.ElideRight
+                    }
+                }
+
+                Button {
+                    id: singInButton
+                    width: loginForm.width - 2* root.panelMargin
+                    height: fieldHeight * 0.7
+                    text: qsTr("Sign up")
+                    font.pixelSize: singInButton.height/2
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    onClicked: {
+                        // TODO changed for merginApi.apiRoot
+                        Qt.openUrlExternally("https://public.cloudmergin.com/auth/signup");
+                    }
+                    background: Rectangle {
+                        color: InputStyle.fontColor
+                    }
+
+                    contentItem: Text {
+                        text: singInButton.text
+                        font: singInButton.font
+                        color: InputStyle.highlightColor
+                        horizontalAlignment: Text.AlignRight
+                        verticalAlignment: Text.AlignRight
                         elide: Text.ElideRight
                     }
                 }

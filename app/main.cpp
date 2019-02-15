@@ -250,7 +250,9 @@ int main(int argc, char *argv[])
 
   // Create mergin api
   //std::unique_ptr<MerginApi> ma =  std::unique_ptr<MerginApi>(new MerginApi(QString("https://mergin.dev.cloudmappin.com"), projectDir ));
-  std::unique_ptr<MerginApi> ma =  std::unique_ptr<MerginApi>(new MerginApi(QString("https://dev.dev.cloudmergin.com/"), projectDir ));
+  //std::unique_ptr<MerginApi> ma =  std::unique_ptr<MerginApi>(new MerginApi(QString("https://dev.dev.cloudmergin.com/"), projectDir ));
+  std::unique_ptr<MerginApi> ma =  std::unique_ptr<MerginApi>(new MerginApi(QString("https://public.cloudmergin.com"), projectDir ));
+
 
   engine.rootContext()->setContextProperty( "__merginApi", ma.get() );
 
