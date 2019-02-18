@@ -153,7 +153,6 @@ DISTFILES += android/AndroidManifest.xml \
     qml/Notification.qml
 
 # packaging
-# Note: libcrypto and libssl currently not included due falling build
 android {
     ANDROID_EXTRA_LIBS += \
         $${QGIS_LIB_DIR}/libcrystax.so \
@@ -197,7 +196,8 @@ android {
         $$QT_LIBS_DIR/libQt5Network.so \
         $$QT_LIBS_DIR/libQt5Sql.so \
         $$QT_LIBS_DIR/libQt5Svg.so \
-        $$QT_LIBS_DIR/libQt5AndroidExtras.so
+        $$QT_LIBS_DIR/libQt5AndroidExtras.so \
+        /Users/vsklencar/soft/crystax-ndk-10.3.2/sources/cxx-stl/gnu-libstdc++/5/libs/armeabi-v7a/libgnustl_shared.so
 
     ANDROID_EXTRA_PLUGINS += $${QGIS_QML_DIR}
 }
